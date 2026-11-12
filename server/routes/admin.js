@@ -22,13 +22,15 @@ export function authRoutes(db, { secureCookies }) {
   r.get('/auth/state', (req, res) => {
     const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
     const ev = getEvent(db);
-    res.json({ needsSetup: userCount === 0, user: req.user || null, hasEvent: !!ev, today: todayISO() });
+    res.json({ needsSetup: userCount === 0, setupTokenRequired: userCount === 0 && !!process.env.SETUP_TOKEN, user: req.user || null, hasEvent: !!ev, today: todayISO() });
   });
 
   // First run: create the first Admin and the event.
   r.post('/auth/setup', (req, res) => {
-    const { email, name, password, eventName, dates } = req.body || {};
+    const { email, name, password, eventName, dates, setupToken } = req.body || {};
     if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0) throw new HttpError(409, 'Setup is already done');
+    // On a public server, SETUP_TOKEN stops a stranger from claiming the first Admin account.
+    if (process.env.SETUP_TOKEN && setupToken !== process.env.SETUP_TOKEN) throw new HttpError(403, 'Setup code is not right');
     if (!email || !password || password.length < 8) throw new HttpError(400, 'Email and a password of at least 8 characters are required');
     const user = tx(db, () => {
       const info = db.prepare(`INSERT INTO users (email, name, role, password_hash) VALUES (?,?, 'admin', ?)`)
@@ -42,12 +44,25 @@ export function authRoutes(db, { secureCookies }) {
     res.json({ ok: true });
   });
 
+  // Slow down password guessing: 10 failed attempts per IP+email per 15 minutes.
+  const failures = new Map();
+  const WINDOW = 15 * 60e3;
   r.post('/auth/login', (req, res) => {
     const { email, password } = req.body || {};
+    const key = `${req.ip}|${cleanText(email).toLowerCase()}`;
+    const now = Date.now();
+    const f = failures.get(key);
+    if (f && now - f.first < WINDOW && f.count >= 10) {
+      throw new HttpError(429, 'Too many failed sign-ins. Wait 15 minutes and try again.');
+    }
     const u = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanText(email).toLowerCase());
     if (!u || !u.active || !verifyPassword(String(password || ''), u.password_hash)) {
+      if (!f || now - f.first >= WINDOW) failures.set(key, { first: now, count: 1 });
+      else f.count++;
+      if (failures.size > 10000) failures.clear();
       throw new HttpError(401, 'Email or password is not right');
     }
+    failures.delete(key);
     createSession(db, res, u.id, secureCookies);
     audit(db, u.id, 'auth.login', 'user', u.id);
     res.json({ user: { id: u.id, email: u.email, name: u.name, role: u.role } });

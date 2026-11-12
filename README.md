@@ -41,6 +41,9 @@ For development, `npm run dev` runs the API on :3000 with reload and the Vite de
 | `DB_FILE` | `data/accreditation.db` | SQLite file |
 | `EVENT_TZ` | `Africa/Lagos` | Time zone that decides "today" for the default event day and same-day undo |
 | `SECURE_COOKIES` | unset | Set to `1` behind HTTPS |
+| `SETUP_TOKEN` | unset | When set, the first-run setup screen requires this code |
+| `BACKUP_DIR` | unset (`/data/backups` in Docker) | Write a database backup on start and every `BACKUP_HOURS` (24) hours |
+| `BACKUP_KEEP` | `14` | Number of backups to keep |
 
 ## Roles
 
@@ -106,6 +109,12 @@ test/api.test.js         end-to-end API tests
 samples/                 blank template and two sample company files
 ```
 
-## Deployment notes
+## Deployment
 
-The app is a single Node process with a single SQLite file. Run it behind HTTPS with `SECURE_COOKIES=1`, and back up `DB_FILE` daily. **Event → Export** downloads the full list with zones and attendance at any time. As the PRD requires, freeze deploys during the event window.
+See **[DEPLOY.md](DEPLOY.md)** for step-by-step hosting on your own domain: Docker and Caddy on a small VPS, with automatic
+HTTPS and daily backups. In short:
+
+```bash
+cp .env.example .env   # set DOMAIN and SETUP_TOKEN
+docker compose up -d --build
+```

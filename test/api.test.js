@@ -284,3 +284,41 @@ test('zones in use cannot be deleted, only retired; walk-ups', async () => {
   const found = await acc1.get('/api/accredit/search?q=walk in');
   assert.ok(found.data.results.some((r) => r.id === w.data.id));
 });
+
+test('login is rate limited after repeated failures', async () => {
+  const c = new Client();
+  let last;
+  for (let i = 0; i < 11; i++) last = await c.post('/api/auth/login', { email: 'lead@example.com', password: 'wrong' });
+  assert.equal(last.status, 429);
+});
+
+test('database backup', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { runBackup } = await import('../server/backup.js');
+  const { openDb: open } = await import('../server/db.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-'));
+  const src = open(path.join(dir, 'live.db'));
+  src.prepare("INSERT INTO events (name) VALUES ('x')").run();
+  for (let i = 0; i < 3; i++) await runBackup(src, path.join(dir, 'b'), 2);
+  const files = fs.readdirSync(path.join(dir, 'b'));
+  assert.ok(files.length >= 1 && files.length <= 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('setup requires SETUP_TOKEN when configured', async () => {
+  const d2 = openDb(':memory:');
+  const s2 = createApp(d2, { serveClient: false }).listen(0);
+  const url = `http://127.0.0.1:${s2.address().port}/api/auth/setup`;
+  process.env.SETUP_TOKEN = 'secret-code';
+  try {
+    const body = { email: 'a@example.com', password: 'password123' };
+    const post = (b) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+    assert.equal((await post(body)).status, 403);
+    assert.equal((await post({ ...body, setupToken: 'secret-code' })).status, 200);
+  } finally {
+    delete process.env.SETUP_TOKEN;
+    s2.close();
+  }
+});

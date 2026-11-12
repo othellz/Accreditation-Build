@@ -69,7 +69,7 @@ export default function App() {
   if (location.pathname.startsWith('/invite/')) {
     return <ToastProvider><Routes><Route path="/invite/:token" element={<Invite onDone={refresh} />} /></Routes></ToastProvider>;
   }
-  if (state.needsSetup) return <ToastProvider><Setup onDone={refresh} /></ToastProvider>;
+  if (state.needsSetup) return <ToastProvider><Setup onDone={refresh} tokenRequired={state.setupTokenRequired} /></ToastProvider>;
   if (!state.user) return <ToastProvider><Login onDone={refresh} /></ToastProvider>;
 
   if (!eventCtx) return <div className="boot">Loading…</div>;
